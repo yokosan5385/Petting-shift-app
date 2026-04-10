@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>飼い付けシフト管理</title>
+    <script>
+        if(localStorage.getItem('theme') === 'dark'){
+            document.documentElement.setAttribute('data-theme', 'dark');
+        }
+    </script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <header>
+        <button id="hamburger-btn" class="hamburger-btn" aria-label="メニューを開く">
+            <span></span>
+            <span></span>
+            <span></span>
+        </button>
+
+        <h1>飼い付けシフト管理</h1>
+
+        <nav id="main-nav" class="tabs">
+            <button class="tab-link active" data-tab="tab-manage">シフト管理</button>
+            <button class="tab-link" data-tab="tab-create">シフト作成</button>
+            <button class="tab-link" data-tab="tab-data">保存データ閲覧</button>
+            <button class="tab-link" data-tab="tab-settings">設定</button>
+        </nav>
+    </header>
+
+    <main>
+        <div id="tab-manage" class="tab-content active">
+            <h2>メンバーとシフト可能日の管理</h2>
+            
+            <section class="card">
+                <h3>メンバー登録</h3>
+                <form id="add-member-form">
+                    <div class="flexarea" style="flex-direction: row; align-items: flex-end; flex-wrap: wrap;">
+                        <div style="flex:2; min-width:200px;">
+                            <label>名前:</label>
+                            <input type="text" id="member-name" placeholder="例: 山田太郎" required>
+                        </div>
+                        <div style="flex:1; min-width:120px;">
+                            <label>学年:</label>
+                            <select id="member-grade">
+                                <option value="1">1年生</option>
+                                <option value="2">2年生</option>
+                                <option value="3">3年生</option>
+                                <option value="4">4年生</option>
+                                <option value="other">その他</option>
+                            </select>
+                        </div>
+                        <div style="flex:1; min-width:120px;">
+                            <button type="submit" style="width: 100%;">追加</button>
+                        </div>
+                    </div>
+                </form>
+            </section>
+
+            <section class="card">
+                <h3>シフト可能日の登録・変更</h3>
+                <p class="muted-text">チェックを入れると「可能」、外すと「不可」として保存されます。</p>
+
+                <div class="filter-controls">
+                    <div class="filter-group">
+                        <label>曜日:</label>
+                        <select id="day-filter">
+                            <option value="all">すべて</option>
+                            <option value="0">月</option>
+                            <option value="1">火</option>
+                            <option value="2">水</option>
+                            <option value="3">木</option>
+                            <option value="4">金</option>
+                            <option value="5">土</option>
+                            <option value="6">日</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>時間:</label>
+                        <select id="time-filter">
+                            <option value="all">すべて</option>
+                            <option value="0">朝</option>
+                            <option value="1">昼</option>
+                            <option value="2">夕</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div id="availability-grid-container"></div>
+                
+                <div class="save-area">
+                    <button id="reset-all-availability" class="secondary-button" type="button">全員クリア (保存前)</button>
+                    <button id="save-availability" class="success-btn">この内容で保存する</button>
+                </div>
+            </section>
+
+            <section class="card">
+                <h3>長期休暇・NG期間の設定</h3>
+                <p class="muted-text">
+                    表の「休」ボタンを押すとここに追加されます。<br>
+                    帰省や旅行などで長期間シフトに入れない期間を設定します。1人で複数設定可能です。
+                </p>
+                <div class="holiday-actions">
+                    <button id="add-all-members-holiday">全員分を追加</button>
+                    <button id="clear-all-holidays" class="secondary-button">全て削除</button>
+                </div>
+                <div id="holiday-settings-container"></div>
+                <div class="save-area">
+                    <button id="save-holiday-settings" class="success-btn">設定を保存する</button>
+                </div>
+            </section>
+        </div>
+
+        <div id="tab-create" class="tab-content">
+            <div class="createtable">
+                <div class="sidetable">
+                    <section class="createcard">
+                        <h2>作成設定</h2>
+                        <form id="create-shift-form">
+                            <div class="flexarea">
+                                <div>
+                                    <label>開始日:</label>
+                                    <input type="date" id="start-date" required>
+                                </div>
+                                <div>
+                                    <label>終了日:</label>
+                                    <input type="date" id="end-date" required>
+                                </div>
+                                <div>
+                                    <label>作成ロジック:</label>
+                                    <select id="creation-method">
+                                        <option value="standard">標準 (均等+連続回避)</option>
+                                        <option value="count">回数均等 (厳格)</option>
+                                        <option value="random">完全ランダム</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <button type="submit">シフト表を作成</button>
+                            <button id="reset-order-button" class="secondary-button" type="button">順番を１つ戻す</button>
+                        </form>
+                    </section>
+                    
+                    <section class="createcard nobottommargin">
+                        <h2>検索</h2>
+                        <div class="inner-tabs">
+                            <button type="button" class="inner-tab-link active" data-target="search-mode-datetime">曜日・時間</button>
+                            <button type="button" class="inner-tab-link" data-target="search-mode-name">名前</button>
+                        </div>
+                        <div id="search-mode-datetime" class="search-mode-content active">
+                            <form id="search-shift-form">
+                                <div class="flexarea">
+                                    <div>
+                                        <label>曜日:</label>
+                                        <select id="search-day">
+                                            <option value="0">月</option>
+                                            <option value="1">火</option>
+                                            <option value="2">水</option>
+                                            <option value="3">木</option>
+                                            <option value="4">金</option>
+                                            <option value="5">土</option>
+                                            <option value="6">日</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label>時間:</label>
+                                        <select id="search-time">
+                                            <option value="0">朝</option>
+                                            <option value="1">昼</option>
+                                            <option value="2">夕</option>
+                                            <option value="all">すべて</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <button type="submit">検索</button>
+                            </form>    
+                        </div>
+                        <div id="search-mode-name" class="search-mode-content">
+                            <form id="search-name-form">
+                                <div class="flexarea">
+                                    <div>
+                                        <label>名前:</label>
+                                        <input type="text" id="search-name-input" list="member-list-suggestions" placeholder="名前を入力" required>
+                                        <datalist id="member-list-suggestions"></datalist>
+                                    </div>
+                                </div>
+                                <button type="submit">検索</button>
+                            </form>
+                        </div>
+                    </section>
+                </div>
+                <div class="table">
+                    <div id="generated-shift-calendar" class="calendar-grid"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="tab-data" class="tab-content">
+            <h2>データ閲覧</h2>
+            <section class="card">
+                <h3>メンバーリスト</h3>
+                <pre id="data-view-members" class="data-pre"></pre>
+            </section>
+            <section class="card">
+                <h3>シフト可能日データ</h3>
+                <pre id="data-view-availability" class="data-pre"></pre>
+            </section>
+            <section class="card">
+                <h3>長期休暇設定データ</h3>
+                <pre id="data-view-holiday" class="data-pre"></pre>
+            </section>
+            <button id="clear-all-data" class="secondary-button" style="width: auto;">全データを削除</button>
+        </div>
+
+        <div id="tab-settings" class="tab-content">
+            <h2>設定</h2>
+            <section class="card">
+                <h3>外観設定</h3>
+                <div class="flexarea" style="flex-direction: row; align-items: center; justify-content: start; gap: 20px;">
+                    <label for="theme-toggle" style="width: auto;">ダークモード:</label>
+                    <label class="switch">
+                        <input type="checkbox" id="theme-toggle">
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+            </section>
+            <section class="card">
+                <h3>ちゃんす当番の設定</h3>
+                <p class="muted-text">チェックを入れた曜日は「ちゃんす当番」を作成しません。</p>
+                <div id="chance-exclusion-settings" class="checkbox-group">
+                    <label><input type="checkbox" value="0"> 月</label>
+                    <label><input type="checkbox" value="1"> 火</label>
+                    <label><input type="checkbox" value="2"> 水</label>
+                    <label><input type="checkbox" value="3"> 木</label>
+                    <label><input type="checkbox" value="4"> 金</label>
+                    <label><input type="checkbox" value="5"> 土</label>
+                    <label><input type="checkbox" value="6"> 日</label>
+                </div>
+            </section>
+            <section class="card">
+                <h3>バックアップ・復元</h3>
+                <div class="flexarea">
+                    <button id="export-btn">ファイルに書き出し (保存)</button>
+                    <div style="display:flex; gap:10px;">
+                        <input type="file" id="import-file" accept=".json" style="display:none;">
+                        <button id="import-btn" class="secondary-button" style="margin-top:0;">ファイルを読み込む (復元)</button>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-content">
+                <h3 id="modal-title"></h3>
+                <div id="modal-body" class="substitute-list">
+                    <p><strong>朝:</strong> <span id="modal-body-asa"></span></p>
+                    <p><strong>昼:</strong> <span id="modal-body-hiru"></span></p>
+                    <p><strong>夕:</strong> <span id="modal-body-yuu"></span></p>
+                    <p><strong>ちゃんす:</strong> <span id="modal-body-chance"></span></p>
+                </div>
+                <button id="modal-close-button" class="secondary-button" style="margin-top:15px; float:right;">閉じる</button>
+            </div>
+        </div>
+
+        <div id="search-modal-overlay" class="modal-overlay">
+            <div class="modal-content">
+                <h3 id="search-modal-title">検索結果</h3>
+                <pre id="search-modal-body" class="data-pre"></pre>
+                <button id="search-modal-close-button" class="secondary-button" style="margin-top:15px; float:right;">閉じる</button>
+            </div>
+        </div>
+    </main>
+
+    <button id="scroll-to-top-btn" class="scroll-to-top" aria-label="ページトップへ戻る">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 15l-6-6-6 6"/>
+        </svg>
+    </button>
+
+    <script src="script.js"></script>
+</body>
+</html>
