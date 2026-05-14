@@ -88,6 +88,25 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; margin-bottom: 
 h3 { font-size: 17px; font-weight: 600; margin-top: 0; margin-bottom: 16px; }
 .muted-text { font-size: 0.9em; color: var(--text-muted); margin-top: 0; margin-bottom: 15px; }
 
+/* ★ 折りたたみ設定 (details / summary) */
+details summary {
+    list-style: none; /* デフォルトの三角形を消す */
+}
+details summary::-webkit-details-marker {
+    display: none; /* Safari向け */
+}
+details summary::before {
+    content: "▶";
+    display: inline-block;
+    width: 1.2em;
+    font-size: 0.9em;
+    transition: transform 0.2s;
+    color: var(--accent-color);
+}
+details[open] summary::before {
+    transform: rotate(90deg); /* 開いたら下向きに */
+}
+
 .createtable { display: flex; flex-direction: row; gap: 24px; }
 .sidetable { width: 320px; flex-shrink: 0; }
 .table { flex-grow: 1; min-width: 0; }
@@ -121,9 +140,7 @@ button.secondary-button:hover { background-color: #ff3b30; color: white; border-
     background-color: var(--bg-color); color: var(--text-main); padding: 16px; border: 1px solid var(--border-color); border-radius: 8px; white-space: pre-wrap; font-family: "SF Mono", "Menlo", monospace; font-size: 13px; overflow-x: auto;
 }
 
-/* ============================================== */
-/* ★ シフト管理グリッド (修正箇所) ★ */
-/* ============================================== */
+/* シフト管理グリッド */
 #availability-grid-container { overflow-x: auto; max-height: 60vh; border: 1px solid var(--border-color); border-radius: 8px; }
 .grid-table { width: 100%; border-collapse: separate; border-spacing: 0; min-width: 800px; }
 .grid-table th, .grid-table td { border-bottom: 1px solid var(--border-color); border-right: 1px solid var(--border-color); padding: 10px 8px; text-align: center; font-size: 14px; }
@@ -140,26 +157,21 @@ button.secondary-button:hover { background-color: #ff3b30; color: white; border-
     border-right: 2px solid var(--border-color); 
     text-align: left; 
     padding-left: 12px; 
-    width: 6em;         /* 全角約5〜6文字分 */
-    min-width: 6em;     /* 縮まないようにする */
-    max-width: 6em;     /* 伸びないようにする */
+    width: 6em; 
+    min-width: 6em; 
+    max-width: 6em; 
     white-space: nowrap; 
     overflow: hidden; 
-    text-overflow: ellipsis; /* 長い名前は...で省略 */
+    text-overflow: ellipsis;
 }
 
 /* 2列目（学年） */
 .grid-table th:nth-child(2), 
-.grid-table td:nth-child(2) {
-    min-width: 80px;
-}
+.grid-table td:nth-child(2) { min-width: 80px; }
 
 /* 3列目（操作ボタン） */
 .grid-table th:nth-child(3), 
-.grid-table td:nth-child(3) {
-    min-width: 100px;
-    white-space: nowrap;
-}
+.grid-table td:nth-child(3) { min-width: 100px; white-space: nowrap; }
 
 .grade-select { border: none; background: transparent; color: var(--text-main); width: 100%; font-weight: 500; text-align: center; cursor: pointer; }
 .grade-select option { background-color: var(--card-bg); color: var(--text-main); }
@@ -177,8 +189,16 @@ button.secondary-button:hover { background-color: #ff3b30; color: white; border-
 .grid-table input[type="checkbox"] { width: 20px; height: 20px; margin: 0 auto; cursor: pointer; display: block; transform: scale(1.5); accent-color: var(--accent-color); }
 .hidden-col { display: none !important; }
 
-/* 長期休暇設定 */
-#holiday-settings-container { display: flex; flex-direction: column; gap: 15px; }
+/* 研修カウンター用のテーブル */
+.counter-table { width: 100%; border-collapse: collapse; min-width: 500px; }
+.counter-table th, .counter-table td { border: 1px solid var(--border-color); padding: 8px 12px; text-align: center; font-size: 14px; }
+.counter-table th { background-color: var(--table-head-bg); font-weight: 600; }
+.counter-table td:first-child { font-weight: 600; text-align: left; }
+.count-btn { background: var(--bg-color); border: 1px solid var(--border-color); color: var(--text-main); padding: 2px 10px; border-radius: 4px; cursor: pointer; font-size: 15px; font-weight: bold; width: auto; box-shadow: none; }
+.count-btn:hover { background: var(--border-color); }
+
+/* 長期休暇/休止期間設定 */
+#holiday-settings-container, #shift-holiday-list { display: flex; flex-direction: column; gap: 15px; }
 .holiday-list-item { background-color: var(--bg-color); border-radius: 10px; padding: 15px; border: 1px solid var(--border-color); display: flex; flex-wrap: wrap; align-items: center; gap: 15px; animation: slideIn 0.3s ease-out; }
 .holiday-member-info { display: flex; align-items: center; gap: 10px; width: 150px; font-weight: 600; }
 .holiday-controls { display: flex; flex: 1; align-items: center; gap: 15px; flex-wrap: wrap; }
@@ -210,7 +230,7 @@ button.secondary-button:hover { background-color: #ff3b30; color: white; border-
 .cell-shifts-ul { list-style: none; padding: 0; margin: 0; }
 .cell-shifts-li { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; align-items: center; }
 .shift-label { color: var(--text-muted); font-weight: 600; font-size: 11px; margin-right: 5px; background-color: var(--bg-color); padding: 2px 6px; border-radius: 4px; }
-.shift-member { font-weight: 600; }
+.shift-member { font-weight: 600; line-height: 1.4; text-align: right; }
 
 /* モーダル */
 .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); backdrop-filter: blur(5px); z-index: 2000; justify-content: center; align-items: center; }
@@ -235,41 +255,12 @@ button.secondary-button:hover { background-color: #ff3b30; color: white; border-
 input:checked + .slider { background-color: #34c759; }
 input:checked + .slider:before { transform: translateX(20px); }
 
-/* ★ スクロールトップボタン (修正箇所) ★ */
+/* スクロールトップボタン */
 .scroll-to-top {
-    position: fixed; 
-    bottom: 30px; 
-    right: 30px; 
-    width: 56px; 
-    height: 56px; 
-    border-radius: 50%; 
-    background-color: var(--card-bg); 
-    color: var(--accent-color); 
-    border: 1px solid var(--border-color); 
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15); 
-    opacity: 0; 
-    visibility: hidden; 
-    transform: translateY(20px); 
-    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); 
-    z-index: 2000; 
-    cursor: pointer; 
-    display: flex; 
-    align-items: center; 
-    justify-content: center; 
-    backdrop-filter: blur(10px);
+    position: fixed; bottom: 30px; right: 30px; width: 56px; height: 56px; border-radius: 50%; background-color: var(--card-bg); color: var(--accent-color); border: 1px solid var(--border-color); box-shadow: 0 4px 12px rgba(0,0,0,0.15); opacity: 0; visibility: hidden; transform: translateY(20px); transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); z-index: 2000; cursor: pointer; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(10px);
 }
-.scroll-to-top.visible { 
-    opacity: 1; 
-    visibility: visible; 
-    transform: translateY(0); 
-}
-.scroll-to-top:hover { 
-    background-color: var(--accent-color); 
-    color: white; 
-    border-color: var(--accent-color); 
-    box-shadow: 0 8px 24px rgba(0, 122, 255, 0.3); 
-    transform: translateY(-4px); 
-}
+.scroll-to-top.visible { opacity: 1; visibility: visible; transform: translateY(0); }
+.scroll-to-top:hover { background-color: var(--accent-color); color: white; border-color: var(--accent-color); box-shadow: 0 8px 24px rgba(0, 122, 255, 0.3); transform: translateY(-4px); }
 [data-theme="dark"] .scroll-to-top { background-color: rgba(44, 44, 46, 0.8); border-color: rgba(255,255,255,0.1); }
 
 /* レスポンシブ (スマホ) */
@@ -298,7 +289,7 @@ input:checked + .slider:before { transform: translateX(20px); }
     .grid-table { display: table; min-width: 800px; width: 100%; border-collapse: separate; }
     .grid-table th, .grid-table td { display: table-cell; padding: 8px; vertical-align: middle; }
     .grid-table input[type="checkbox"] { width: auto; height: auto; display: inline-block; transform: scale(1.5); }
-    .grid-table td:nth-child(n+3) { display: table-cell; text-align: center; }
+    .grid-table td:nth-child(n+4) { display: table-cell; text-align: center; }
 
     .holiday-list-item { flex-direction: column; align-items: flex-start; gap: 10px; }
     .holiday-member-info { width: 100%; justify-content: space-between; }
