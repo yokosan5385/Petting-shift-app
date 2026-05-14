@@ -57,6 +57,12 @@
                         </div>
                     </div>
                 </form>
+                
+                <div style="margin-top: 15px; border-top: 1px dashed var(--border-color); padding-top: 15px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+                    <span style="font-size: 13px; font-weight: 600;">学年の一括更新:</span>
+                    <button type="button" id="btn-grade-up" class="secondary-button" style="width:auto; padding: 6px 12px; font-size: 13px; color: var(--accent-color); border-color: var(--accent-color);">学年を +1 進める</button>
+                    <button type="button" id="btn-grade-down" class="secondary-button" style="width:auto; padding: 6px 12px; font-size: 13px; color: var(--text-muted); border-color: var(--border-color);">学年を -1 戻す</button>
+                </div>
             </section>
 
             <section class="card">
@@ -109,6 +115,21 @@
                 <div id="holiday-settings-container"></div>
                 <div class="save-area">
                     <button id="save-holiday-settings" class="success-btn">設定を保存する</button>
+                </div>
+            </section>
+
+            <section class="card">
+                <h3>シフトを作らない日（休止期間）の設定</h3>
+                <p class="muted-text">お盆や年末年始など、シフトを作成しない（休止とする）期間を設定します。</p>
+                <div class="flexarea">
+                    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                        <input type="date" id="shift-holiday-start" style="flex:1; min-width:120px;">
+                        <span>〜</span>
+                        <input type="date" id="shift-holiday-end" style="flex:1; min-width:120px;">
+                        <button type="button" id="add-shift-holiday-btn" style="width:auto; padding:10px 20px;">追加</button>
+                    </div>
+                    <div id="shift-holiday-list" style="display:flex; flex-direction:column; gap:8px; margin-top:10px;"></div>
+                    <button id="save-shift-holidays-btn" class="success-btn" style="margin-top:10px;">休止期間を保存する</button>
                 </div>
             </section>
         </div>
@@ -215,6 +236,7 @@
 
         <div id="tab-settings" class="tab-content">
             <h2>設定</h2>
+
             <section class="card">
                 <h3>外観設定</h3>
                 <div class="flexarea" style="flex-direction: row; align-items: center; justify-content: start; gap: 20px;">
@@ -225,19 +247,101 @@
                     </label>
                 </div>
             </section>
+
             <section class="card">
-                <h3>ちゃんす当番の設定</h3>
-                <p class="muted-text">チェックを入れた曜日は「ちゃんす当番」を作成しません。</p>
-                <div id="chance-exclusion-settings" class="checkbox-group">
-                    <label><input type="checkbox" value="0"> 月</label>
-                    <label><input type="checkbox" value="1"> 火</label>
-                    <label><input type="checkbox" value="2"> 水</label>
-                    <label><input type="checkbox" value="3"> 木</label>
-                    <label><input type="checkbox" value="4"> 金</label>
-                    <label><input type="checkbox" value="5"> 土</label>
-                    <label><input type="checkbox" value="6"> 日</label>
+                <h3>ちゃんす当番の対象学年と除外曜日</h3>
+                <div class="flexarea">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <label>担当する学年:</label>
+                        <select id="chance-target-grade" style="width: auto;">
+                            <option value="1">1年生のみ</option>
+                            <option value="2">2年生のみ</option>
+                            <option value="3">3年生のみ</option>
+                            <option value="4">4年生のみ</option>
+                            <option value="all">全員対象</option>
+                        </select>
+                    </div>
+                    <div style="margin-top:10px;">
+                        <p class="muted-text">チェックを入れた曜日は「ちゃんす当番」を作成しません。</p>
+                        <div id="chance-exclusion-settings" class="checkbox-group">
+                            <label><input type="checkbox" value="0"> 月</label>
+                            <label><input type="checkbox" value="1"> 火</label>
+                            <label><input type="checkbox" value="2"> 水</label>
+                            <label><input type="checkbox" value="3"> 木</label>
+                            <label><input type="checkbox" value="4"> 金</label>
+                            <label><input type="checkbox" value="5"> 土</label>
+                            <label><input type="checkbox" value="6"> 日</label>
+                        </div>
+                    </div>
                 </div>
             </section>
+
+            <section class="card">
+                <h3>1年生の研修設定（自動サポート）</h3>
+                <p class="muted-text">1年生が以下の回数または期間を満たすまで、自動的に先輩が同じ枠に追加されます。<br>（空白なら無制限。回数か期間のどちらかを満たせば研修完了となります）</p>
+                
+                <div style="display:flex; flex-direction:column; gap:16px;">
+                    <div style="padding:15px; border:1px solid var(--border-color); border-radius:8px;">
+                        <h4 style="margin-top:0; margin-bottom:10px;">通常シフト（朝・昼・夕）の設定</h4>
+                        <div class="flexarea" style="flex-direction:row; flex-wrap:wrap; gap:15px;">
+                            <div style="flex:1; min-width:110px;">
+                                <label>朝の必要回数:</label>
+                                <input type="number" id="tr-req-asa" min="0" placeholder="0">
+                            </div>
+                            <div style="flex:1; min-width:110px;">
+                                <label>昼の必要回数:</label>
+                                <input type="number" id="tr-req-hiru" min="0" placeholder="0">
+                            </div>
+                            <div style="flex:1; min-width:110px;">
+                                <label>夕の必要回数:</label>
+                                <input type="number" id="tr-req-yuu" min="0" placeholder="0">
+                            </div>
+                            <div style="flex:1; min-width:130px;">
+                                <label>研修終了日:</label>
+                                <input type="date" id="tr-end-date">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div style="padding:15px; border:1px solid var(--border-color); border-radius:8px;">
+                        <h4 style="margin-top:0; margin-bottom:10px;">ちゃんす当番の設定</h4>
+                        <div class="flexarea" style="flex-direction:row; flex-wrap:wrap; gap:15px;">
+                            <div style="flex:1; min-width:110px;">
+                                <label>必要回数:</label>
+                                <input type="number" id="tr-req-chance" min="0" placeholder="0">
+                            </div>
+                            <div style="flex:1; min-width:130px;">
+                                <label>研修終了日:</label>
+                                <input type="date" id="tr-chance-end-date">
+                            </div>
+                            <div style="flex:1; min-width:130px;">
+                                <label>追加する先輩の学年:</label>
+                                <select id="tr-chance-senpai">
+                                    <option value="2">2年生</option>
+                                    <option value="3">3年生</option>
+                                    <option value="4">4年生</option>
+                                    <option value="other">その他</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <button id="save-training-settings" class="success-btn" style="width:auto; align-self:flex-end;">研修設定を保存</button>
+                </div>
+            </section>
+
+            <section class="card">
+                <details style="cursor: pointer; outline: none;">
+                    <summary style="font-size: 17px; font-weight: 600; outline: none; margin-bottom: 5px;">
+                        1年生の研修回数カウンター <span style="font-size: 0.8em; color: var(--text-muted); font-weight: normal;">(クリックで開閉)</span>
+                    </summary>
+                    <div style="margin-top: 15px; cursor: default; padding-top: 15px; border-top: 1px solid var(--border-color);">
+                        <p class="muted-text">シフトが作成されると自動で増えますが、手動で調整することもできます。</p>
+                        <div id="training-counter-container" style="overflow-x: auto;"></div>
+                    </div>
+                </details>
+            </section>
+
             <section class="card">
                 <h3>バックアップ・復元</h3>
                 <div class="flexarea">
