@@ -16,7 +16,7 @@ function dbLoad(key, def) {
     try { return JSON.parse(d); } catch (e) { return def; }
 }
 
-// 休日判定関数
+// 休日判定関数 (長期休暇)
 function isHoliday(memberId, dateObj, settingsArray) {
     if (!Array.isArray(settingsArray)) return false;
     const mySettings = settingsArray.filter(s => s.memberId === memberId);
@@ -40,12 +40,53 @@ function isHoliday(memberId, dateObj, settingsArray) {
     });
 }
 
+// シフト休止日判定
+function isShiftHoliday(dateObj, holidays) {
+    let t = dateObj.getTime();
+    return holidays.some(h => {
+        if(!h.start || !h.end) return false;
+        let s = new Date(h.start).getTime();
+        let e = new Date(h.end).setHours(23,59,59,999);
+        return t >= s && t <= e;
+    });
+}
+
+// 1年生の研修中判定（時間帯ごと）
+function isTraining(member, dateObj, tSet, typeKey) {
+    if (member.grade !== '1') return false; // 1年生以外は対象外
+    
+    let counts = member.trainingCounts || { asa: 0, hiru: 0, yuu: 0, chance: 0 };
+    
+    let reqCount = 0;
+    let endDateStr = '';
+
+    if (typeKey === 'chance') {
+        reqCount = parseInt(tSet.req_chance) || 0;
+        endDateStr = tSet.chance_end_date;
+    } else {
+        reqCount = parseInt(tSet[`req_${typeKey}`]) || 0;
+        endDateStr = tSet.end_date;
+    }
+
+    if (reqCount === 0 && !endDateStr) return false; // 設定なし
+    if (reqCount > 0 && counts[typeKey] >= reqCount) return false; // 回数クリア
+
+    if (endDateStr) {
+        let eDate = new Date(endDateStr);
+        eDate.setHours(23,59,59,999);
+        if (dateObj.getTime() > eDate.getTime()) return false; // 期間クリア
+    }
+
+    return true; // 研修中
+}
+
+
 document.addEventListener('DOMContentLoaded', () => {
 
     // ==========================================
-    // 初期化処理
+    // 初期化・データ移行処理
     // ==========================================
-    (function migrateHolidaySettings(){
+    (function migrateData(){
         let settings = dbLoad('holiday_settings', []);
         if (!Array.isArray(settings)) {
             const arr = [];
@@ -56,6 +97,24 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             dbSave('holiday_settings', arr);
         }
+
+        let members = dbLoad('members', []);
+        let isModified = false;
+        members.forEach(m => {
+            if (typeof m.trainingCount === 'number') {
+                if (!m.trainingCounts) {
+                    m.trainingCounts = {
+                        asa: m.trainingCount,
+                        hiru: m.trainingCount,
+                        yuu: m.trainingCount,
+                        chance: m.trainingCount
+                    };
+                }
+                delete m.trainingCount; 
+                isModified = true;
+            }
+        });
+        if (isModified) dbSave('members', members);
     })();
 
     // スマホメニュー＆タブ切り替え
@@ -78,13 +137,17 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById(tabId).classList.add('active');
             mainNav.classList.remove('open');
 
-            if (tabId === 'tab-manage') { renderAvailabilityGrid(); renderHolidaySettings(); }
+            if (tabId === 'tab-manage') { 
+                renderAvailabilityGrid(); 
+                renderHolidaySettings(); 
+                renderShiftHolidays();
+            }
             if (tabId === 'tab-create') { renderGeneratedShift(); updateNameSuggestions(); }
             if (tabId === 'tab-data') { renderDataView(); }
+            if (tabId === 'tab-settings') { renderTrainingCounters(); }
         });
     });
 
-    // ★ スクロールトップボタンの修正
     const scrollBtn = document.getElementById('scroll-to-top-btn');
     window.addEventListener('scroll', () => {
         if (window.scrollY > window.innerHeight * 0.5) {
@@ -103,7 +166,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const dayFilter = document.getElementById('day-filter');
     const timeFilter = document.getElementById('time-filter');
 
-    // ★ フィルターのロジック修正（列が一つ増えたため i=3 から開始）
     function applyGridFilters() {
         const sDay = dayFilter.value;
         const sTime = timeFilter.value;
@@ -128,7 +190,6 @@ document.addEventListener('DOMContentLoaded', () => {
     dayFilter.addEventListener('change', applyGridFilters);
     timeFilter.addEventListener('change', applyGridFilters);
     
-    // ★ グリッドの描画処理（列の分離）
     function renderAvailabilityGrid() {
         const members = dbLoad('members', []);
         const availability = dbLoad('availability', {});
@@ -148,14 +209,12 @@ document.addEventListener('DOMContentLoaded', () => {
         displayM.forEach(m => {
             const av = availability[m.id] || Array(21).fill(0);
             
-            // 学年
             let gs = `<select class="grade-select" data-mid="${m.id}">`;
             [{v:'1',l:'1年'},{v:'2',l:'2年'},{v:'3',l:'3年'},{v:'4',l:'4年'},{v:'other',l:'他'}].forEach(o=>{
                 gs+=`<option value="${o.v}" ${m.grade==o.v?'selected':''}>${o.l}</option>`;
             });
             gs+='</select>';
-            
-            // ボタン類（名前と分離）
+
             let actionButtons = `
                 <button type="button" class="row-holiday-btn" data-mid="${m.id}" title="長期休暇設定">休</button>
                 <button type="button" class="row-fill-btn" data-mid="${m.id}" title="全て〇に">〇</button>
@@ -163,9 +222,9 @@ document.addEventListener('DOMContentLoaded', () => {
             `;
 
             h+=`<tr>`;
-            h+=`<td title="${m.name}">${m.name}</td>`; // 名前（固定）
-            h+=`<td>${gs}</td>`;                        // 学年（スクロール）
-            h+=`<td>${actionButtons}</td>`;             // 操作（スクロール）
+            h+=`<td title="${m.name}">${m.name}</td>`;
+            h+=`<td>${gs}</td>`;
+            h+=`<td>${actionButtons}</td>`;
             
             for(let i=0; i<21; i++){
                 h+=`<td><input type="checkbox" data-mid="${m.id}" data-idx="${i}" ${av[i]===1?'checked':''}></td>`;
@@ -190,11 +249,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const mid = parseInt(e.target.dataset.mid);
         if(e.target.classList.contains('row-reset-btn')){
             if(!confirm('この行をクリアしますか？')) return;
-            gridContainer.querySelectorAll(`input[data-mid="${mid}"]`).forEach(c=>c.checked=false);
+            gridContainer.querySelectorAll(`input[type="checkbox"][data-mid="${mid}"]`).forEach(c=>c.checked=false);
         }
         if(e.target.classList.contains('row-fill-btn')){
             e.preventDefault();
-            const checkboxes = gridContainer.querySelectorAll(`input[data-mid="${mid}"]`);
+            const checkboxes = gridContainer.querySelectorAll(`input[type="checkbox"][data-mid="${mid}"]`);
             checkboxes.forEach(cb => {
                 const cell = cb.closest('td');
                 if (cell && !cell.classList.contains('hidden-col')) cb.checked = true;
@@ -213,15 +272,44 @@ document.addEventListener('DOMContentLoaded', () => {
         if(!nm) return;
         const members = dbLoad('members', []);
         const newId = members.length > 0 ? Math.max(...members.map(x=>x.id)) + 1 : 1;
-        members.push({ id: newId, name: nm, grade: document.getElementById('member-grade').value });
+        members.push({ id: newId, name: nm, grade: document.getElementById('member-grade').value, trainingCounts: {asa:0, hiru:0, yuu:0, chance:0} });
         dbSave('members', members);
         nameIn.value='';
         renderAvailabilityGrid();
+        renderTrainingCounters();
         alert('追加しました');
     });
 
+    document.getElementById('btn-grade-up').addEventListener('click', () => {
+        if(!confirm('全メンバーの学年を1つ進めますか？\n（4年生は「その他」になります）')) return;
+        const members = dbLoad('members', []);
+        members.forEach(m => {
+            if(m.grade === '1') m.grade = '2';
+            else if(m.grade === '2') m.grade = '3';
+            else if(m.grade === '3') m.grade = '4';
+            else if(m.grade === '4') m.grade = 'other';
+        });
+        dbSave('members', members);
+        renderAvailabilityGrid();
+        renderTrainingCounters();
+    });
+
+    document.getElementById('btn-grade-down').addEventListener('click', () => {
+        if(!confirm('全メンバーの学年を1つ戻しますか？')) return;
+        const members = dbLoad('members', []);
+        members.forEach(m => {
+            if(m.grade === '2') m.grade = '1';
+            else if(m.grade === '3') m.grade = '2';
+            else if(m.grade === '4') m.grade = '3';
+            else if(m.grade === 'other') m.grade = '4';
+        });
+        dbSave('members', members);
+        renderAvailabilityGrid();
+        renderTrainingCounters();
+    });
+
     document.getElementById('reset-all-availability').addEventListener('click', ()=>{
-        if(confirm('全員分クリアしますか？')) document.querySelectorAll('#availability-grid-container input[type=checkbox]').forEach(c=>c.checked=false);
+        if(confirm('全員分クリアしますか？')) gridContainer.querySelectorAll('input[type="checkbox"]').forEach(c=>c.checked=false);
     });
     
     document.getElementById('save-availability').addEventListener('click', ()=>{
@@ -229,7 +317,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if(!members.length) return alert('メンバーがいません');
         const newAv = {};
         members.forEach(m=>newAv[m.id]=Array(21).fill(0));
-        document.querySelectorAll('#availability-grid-container input[type=checkbox]').forEach(c=>{
+        gridContainer.querySelectorAll('input[type="checkbox"]').forEach(c=>{
             if(c.checked) newAv[c.dataset.mid][parseInt(c.dataset.idx)] = 1;
         });
         dbSave('availability', newAv);
@@ -345,6 +433,51 @@ document.addEventListener('DOMContentLoaded', () => {
         alert('長期休暇設定を保存しました。');
     });
 
+    // シフト休止期間
+    const shiftHolidaysList = document.getElementById('shift-holiday-list');
+    function renderShiftHolidays() {
+        if(!shiftHolidaysList) return;
+        const holidays = dbLoad('shift_holidays', []);
+        shiftHolidaysList.innerHTML = '';
+        holidays.forEach((h, index) => {
+            const div = document.createElement('div');
+            div.style.display = 'flex'; div.style.gap = '10px'; div.style.alignItems = 'center';
+            div.innerHTML = `
+                <span style="font-weight:600; font-size:14px;">${h.start} 〜 ${h.end}</span>
+                <button type="button" class="remove-sh-btn hover-red" data-index="${index}" style="background:transparent; color:#ff3b30; border:1px solid rgba(255, 59, 48, 0.3); padding:4px 8px; border-radius:4px; cursor:pointer;">削除</button>
+            `;
+            shiftHolidaysList.appendChild(div);
+        });
+        
+        shiftHolidaysList.querySelectorAll('.remove-sh-btn').forEach(btn => {
+            btn.addEventListener('click', e => {
+                const idx = parseInt(e.target.dataset.index);
+                let current = dbLoad('shift_holidays', []);
+                current.splice(idx, 1);
+                dbSave('shift_holidays', current);
+                renderShiftHolidays();
+            });
+        });
+    }
+
+    const addShBtn = document.getElementById('add-shift-holiday-btn');
+    if(addShBtn) {
+        addShBtn.addEventListener('click', () => {
+            const s = document.getElementById('shift-holiday-start').value;
+            const e = document.getElementById('shift-holiday-end').value;
+            if(!s || !e) return alert('開始日と終了日を入力してください。');
+            if(new Date(s) > new Date(e)) return alert('終了日は開始日より後にしてください。');
+            
+            let current = dbLoad('shift_holidays', []);
+            current.push({ start: s, end: e });
+            dbSave('shift_holidays', current);
+            
+            document.getElementById('shift-holiday-start').value = '';
+            document.getElementById('shift-holiday-end').value = '';
+            renderShiftHolidays();
+        });
+    }
+
 
     // ==========================================
     // タブ2: シフト作成
@@ -373,6 +506,14 @@ document.addEventListener('DOMContentLoaded', () => {
             let holidaySettings = dbLoad('holiday_settings', []);
             if (!Array.isArray(holidaySettings)) holidaySettings = [];
 
+            // 各種設定の読み込み
+            const chanceGrade = dbLoad('chance_target_grade', '1');
+            const trainingSettings = dbLoad('training_settings', { 
+                end_date: '', req_asa: 0, req_hiru: 0, req_yuu: 0, 
+                chance_end_date: '', req_chance: 0, chance_senpai_grade: '2' 
+            });
+            const shiftHolidays = dbLoad('shift_holidays', []);
+
             if(!members.length) return alert('メンバーがいません');
 
             dbSave('members_last_order', members);
@@ -389,17 +530,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (days <= 0) { alert("終了日は開始日より後の日付にしてください"); return; }
 
-            let startW = (startD.getDay()+6)%7;
             const results = [];
             let currD = new Date(startD);
-            let currW = startW;
-
+            
             let memberShiftCounts = {};
             members.forEach(m => memberShiftCounts[m.id] = 0);
 
             for(let i=0; i<days; i++){
                 if(i>0) currD.setDate(currD.getDate()+1);
+                
                 const dStr = `${currD.getFullYear()}-${String(currD.getMonth()+1).padStart(2,0)}-${String(currD.getDate()).padStart(2,0)}`;
+                let currW = currD.getDay() === 0 ? 6 : currD.getDay() - 1; // 月=0に補正
+
+                // 休止期間チェック
+                if (isShiftHoliday(currD, shiftHolidays)) {
+                    results.push({ 
+                        date: dStr, 
+                        dayOfWeek: W_LIST[currW], 
+                        shifts: { asa:'(休止)', hiru:'(休止)', yuu:'(休止)', chance:'(休止)' }, 
+                        dayOfWeekIndex: currW,
+                        isHoliday: true
+                    });
+                    continue;
+                }
                 
                 let assignedTodayIds = [];
                 let shifts = {asa:'',hiru:'',yuu:'',chance:''};
@@ -414,12 +567,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     shifts.chance = '-';
                 }
 
+                // 候補者抽出
                 slots.forEach(s => {
                     s.candidates = members.filter(m => {
                         if (isHoliday(m.id, currD, holidaySettings)) return false;
                         const av = availability[m.id] || [];
+                        
                         if (s.type === 'chance') {
-                            return m.grade == '1' && (av[currW*3] || av[currW*3+1] || av[currW*3+2]);
+                            if (chanceGrade !== 'all' && m.grade !== chanceGrade) return false;
+                            return (av[currW*3] || av[currW*3+1] || av[currW*3+2]);
                         } else {
                             return av[currW*3 + s.type] === 1;
                         }
@@ -439,8 +595,8 @@ document.addEventListener('DOMContentLoaded', () => {
                                 m.score -= memberShiftCounts[m.id] * 10;
                                 let penalty = 0;
                                 for (let k = 1; k < 30; k++) {
-                                    if (i - k >= 0) {
-                                        const pastShift = results[i - k];
+                                    if (results.length - k >= 0) {
+                                        const pastShift = results[results.length - k];
                                         if(!pastShift || !pastShift.shifts) continue;
                                         const isAssignedAny = Object.values(pastShift.shifts).includes(m.name);
                                         const isAssignedSame = (pastShift.shifts[s.k] === m.name);
@@ -465,20 +621,68 @@ document.addEventListener('DOMContentLoaded', () => {
 
                         validCandidates.sort((a, b) => b.score - a.score);
                         const picked = validCandidates[0];
-                        shifts[s.k] = picked.name;
+                        
+                        let shiftName = picked.name;
                         assignedTodayIds.push(picked.id);
                         memberShiftCounts[picked.id]++;
+                        
+                        // ★ 研修中判定・先輩抽出
+                        let isTr = isTraining(picked, currD, trainingSettings, s.k);
+                        if(isTr) {
+                            if (!picked.trainingCounts) picked.trainingCounts = {asa:0, hiru:0, yuu:0, chance:0};
+                            picked.trainingCounts[s.k]++;
+                            
+                            let chanceSenpaiGrade = trainingSettings.chance_senpai_grade || '2';
+                            
+                            // 先輩を探す
+                            let senpaiCands = members.filter(m => {
+                                if (m.grade === '1') return false; // 1年生は除外
+                                if (assignedTodayIds.includes(m.id)) return false; // 既に選ばれている人は除外
+                                if (isHoliday(m.id, currD, holidaySettings)) return false; // 休暇中は除外
+
+                                // ★ 学年チェック（ちゃんすのみ: 完全一致）
+                                if (s.k === 'chance') {
+                                    if (m.grade !== chanceSenpaiGrade) return false; 
+                                }
+
+                                // その枠に入れるかチェック
+                                const av = availability[m.id] || [];
+                                if (s.k === 'chance') {
+                                    return (av[currW*3] || av[currW*3+1] || av[currW*3+2]);
+                                } else {
+                                    return av[currW*3 + s.type] === 1;
+                                }
+                            });
+
+                            if(senpaiCands.length > 0) {
+                                senpaiCands.forEach(m => {
+                                    m.score = 100 - ((memberShiftCounts[m.id] || 0) * 10) + Math.random();
+                                });
+                                senpaiCands.sort((a,b) => b.score - a.score);
+                                let senpai = senpaiCands[0];
+                                
+                                shiftName += `<br><span style="font-size:0.85em; color:var(--text-muted);">＋${senpai.name}</span>`;
+                                assignedTodayIds.push(senpai.id);
+                                memberShiftCounts[senpai.id] = (memberShiftCounts[senpai.id] || 0) + 1;
+                            } else {
+                                shiftName += `<br><span style="font-size:0.85em; color:var(--error-text);">＋先輩不足!</span>`;
+                            }
+                        }
+                        
+                        shifts[s.k] = shiftName;
                     } else {
                         shifts[s.k] = '(担当不可)';
                     }
                 });
 
                 results.push({ date:dStr, dayOfWeek:W_LIST[currW], shifts:shifts, dayOfWeekIndex:currW });
-                currW = (currW+1)%7;
             }
 
             dbSave('created_shift', results);
+            dbSave('members', members); // 研修カウンターを保存
             renderGeneratedShift();
+            renderAvailabilityGrid(); 
+            if(typeof renderTrainingCounters === 'function') renderTrainingCounters();
             alert(`作成しました\n期間: ${days}日間`);
         } catch(err) {
             console.error(err);
@@ -490,7 +694,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const bk = dbLoad('members_last_order', []);
         if(bk.length){ 
             dbSave('members', bk); 
-            alert('シフト作成前のメンバー順（バックアップ）に戻しました。'); 
+            renderAvailabilityGrid();
+            if(typeof renderTrainingCounters === 'function') renderTrainingCounters();
+            alert('シフト作成前のメンバー順（バックアップ）に戻しました。研修カウンターも作成前の状態に戻ります。'); 
         } else {
             alert('履歴がありません。');
         }
@@ -510,8 +716,16 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         res.forEach(r => {
+            if(r.isHoliday) {
+                h+=`<div class="calendar-cell" style="background-color: var(--table-head-bg); opacity:0.7;">
+                    <div class="cell-date" style="color:var(--text-muted);">${r.date} (${r.dayOfWeek})</div>
+                    <div style="text-align:center; padding-top:20px; font-weight:bold; color:var(--text-muted);">休止</div>
+                </div>`;
+                return;
+            }
+
             const s = r.shifts;
-            const isError = Object.values(s).includes('(担当不可)');
+            const isError = Object.values(s).some(v => v.includes('(担当不可)') || v.includes('先輩不足'));
             
             h+=`<div class="calendar-cell ${isError ? 'has-error' : ''}" data-json='${JSON.stringify(r)}'>
                 <div class="cell-date">${r.date} (${r.dayOfWeek})</div>
@@ -544,7 +758,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if(genCal) {
         genCal.addEventListener('click', e => {
             const cell = e.target.closest('.calendar-cell');
-            if (!cell || cell.classList.contains('empty')) return;
+            if (!cell || cell.classList.contains('empty') || !cell.dataset.json) return;
             
             const data = JSON.parse(cell.dataset.json);
             const s = data.shifts;
@@ -555,13 +769,16 @@ document.addEventListener('DOMContentLoaded', () => {
             const availability = dbLoad('availability', {});
             const createdShifts = dbLoad('created_shift', []);
             let holidaySettings = dbLoad('holiday_settings', []);
+            const chanceGrade = dbLoad('chance_target_grade', '1');
 
             if (members.length === 0) return;
 
             const getLastDate = (mName, typeKey) => {
+                if(!mName) return -1;
+                const cleanName = mName.split('<br>')[0]; 
                 let lastDate = -1;
                 for (const shift of createdShifts) {
-                    if (shift.shifts && shift.shifts[typeKey] === mName) {
+                    if (shift.shifts && shift.shifts[typeKey] && shift.shifts[typeKey].includes(cleanName)) {
                         const d = new Date(shift.date).getTime();
                         if (d > lastDate) lastDate = d;
                     }
@@ -569,19 +786,25 @@ document.addEventListener('DOMContentLoaded', () => {
                 return lastDate;
             };
 
-            const getCandidates = (typeKey, currentName) => {
+            const getCandidates = (typeKey, currentHtml) => {
+                let currentNames = [];
+                if(currentHtml) {
+                    const parts = currentHtml.replace(/<[^>]*>?/gm, ' ').split('＋');
+                    currentNames = parts.map(p => p.trim());
+                }
+
                 let cands = members.filter(m => {
                     if (isHoliday(m.id, targetDate, holidaySettings)) return false;
                     const av = availability[m.id] || [];
                     const idx = (typeKey === 'chance') ? -1 : (typeKey === 'asa' ? 0 : (typeKey === 'hiru' ? 1 : 2));
                     let isOk = false;
                     if (typeKey === 'chance') {
-                        if (m.grade != '1') return false;
+                        if (chanceGrade !== 'all' && m.grade !== chanceGrade) return false;
                         isOk = (av[dayIndex*3]===1 || av[dayIndex*3+1]===1 || av[dayIndex*3+2]===1);
                     } else { 
                         isOk = (av[dayIndex*3 + idx] === 1); 
                     }
-                    return isOk && m.name !== currentName;
+                    return isOk && !currentNames.includes(m.name);
                 });
                 
                 cands.sort((a, b) => {
@@ -598,10 +821,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const subChance = getCandidates('chance', s.chance);
 
             document.getElementById('modal-title').textContent = `${data.date} の代打候補`;
-            document.getElementById('modal-body-asa').innerHTML = `<span style="color:var(--accent-color);">${s.asa}</span> → ${subAsa.length ? subAsa.join(', ') : 'なし'}`;
-            document.getElementById('modal-body-hiru').innerHTML = `<span style="color:var(--accent-color);">${s.hiru}</span> → ${subHiru.length ? subHiru.join(', ') : 'なし'}`;
-            document.getElementById('modal-body-yuu').innerHTML = `<span style="color:var(--accent-color);">${s.yuu}</span> → ${subYuu.length ? subYuu.join(', ') : 'なし'}`;
-            document.getElementById('modal-body-chance').innerHTML = `<span style="color:var(--accent-color);">${s.chance}</span> → ${subChance.length ? subChance.join(', ') : 'なし'}`;
+            document.getElementById('modal-body-asa').innerHTML = `<span style="color:var(--accent-color);">${s.asa}</span><br>→ ${subAsa.length ? subAsa.join(', ') : 'なし'}`;
+            document.getElementById('modal-body-hiru').innerHTML = `<span style="color:var(--accent-color);">${s.hiru}</span><br>→ ${subHiru.length ? subHiru.join(', ') : 'なし'}`;
+            document.getElementById('modal-body-yuu').innerHTML = `<span style="color:var(--accent-color);">${s.yuu}</span><br>→ ${subYuu.length ? subYuu.join(', ') : 'なし'}`;
+            document.getElementById('modal-body-chance').innerHTML = `<span style="color:var(--accent-color);">${s.chance}</span><br>→ ${subChance.length ? subChance.join(', ') : 'なし'}`;
             
             document.getElementById('modal-overlay').classList.add('visible');
         });
@@ -704,6 +927,117 @@ document.addEventListener('DOMContentLoaded', () => {
     // ==========================================
     // タブ4: 設定
     // ==========================================
+    
+    // 研修回数カウンター
+    const counterContainer = document.getElementById('training-counter-container');
+    function renderTrainingCounters() {
+        if(!counterContainer) return;
+        const members = dbLoad('members', []);
+        const firstYears = members.filter(m => m.grade === '1');
+        
+        if(firstYears.length === 0) {
+            counterContainer.innerHTML = '<p class="muted-text">現在1年生はいません。</p>';
+            return;
+        }
+
+        let h = '<table class="counter-table"><thead><tr><th>名前</th><th>朝</th><th>昼</th><th>夕</th><th>ちゃんす</th></tr></thead><tbody>';
+        
+        firstYears.forEach(m => {
+            let counts = m.trainingCounts || {asa:0, hiru:0, yuu:0, chance:0};
+            
+            h += `<tr><td>${m.name}</td>`;
+            ['asa', 'hiru', 'yuu', 'chance'].forEach(k => {
+                h += `<td>
+                    <div style="display:flex; align-items:center; justify-content:center; gap:5px;">
+                        <button class="count-btn" data-mid="${m.id}" data-key="${k}" data-val="-1">-</button>
+                        <span style="display:inline-block; min-width:20px; font-weight:bold;">${counts[k]}</span>
+                        <button class="count-btn" data-mid="${m.id}" data-key="${k}" data-val="1">+</button>
+                    </div>
+                </td>`;
+            });
+            h += `</tr>`;
+        });
+        h += '</tbody></table>';
+        counterContainer.innerHTML = h;
+    }
+
+    if(counterContainer) {
+        counterContainer.addEventListener('click', e => {
+            if(e.target.classList.contains('count-btn')){
+                const mid = parseInt(e.target.dataset.mid);
+                const key = e.target.dataset.key;
+                const val = parseInt(e.target.dataset.val);
+                
+                const members = dbLoad('members', []);
+                const m = members.find(x => x.id === mid);
+                if(m){
+                    if(!m.trainingCounts) m.trainingCounts = {asa:0, hiru:0, yuu:0, chance:0};
+                    m.trainingCounts[key] += val;
+                    if(m.trainingCounts[key] < 0) m.trainingCounts[key] = 0;
+                    dbSave('members', members);
+                    renderTrainingCounters();
+                }
+            }
+        });
+    }
+
+    // ちゃんす当番学年
+    const chanceGradeSelect = document.getElementById('chance-target-grade');
+    if(chanceGradeSelect) {
+        chanceGradeSelect.value = dbLoad('chance_target_grade', '1');
+        chanceGradeSelect.addEventListener('change', e => {
+            dbSave('chance_target_grade', e.target.value);
+        });
+    }
+
+    // ちゃんす除外曜日
+    const chanceExclusionContainer = document.getElementById('chance-exclusion-settings');
+    if(chanceExclusionContainer){
+        const savedExclusion = dbLoad('chance_exclusion', []);
+        chanceExclusionContainer.querySelectorAll('input').forEach(input => {
+            if(savedExclusion.includes(parseInt(input.value))) input.checked = true;
+        });
+        chanceExclusionContainer.addEventListener('change', () => {
+            const newExclusion = [];
+            chanceExclusionContainer.querySelectorAll('input:checked').forEach(input => {
+                newExclusion.push(parseInt(input.value));
+            });
+            dbSave('chance_exclusion', newExclusion);
+        });
+    }
+
+    // 1年生研修設定 (細分化)
+    const trSaveBtn = document.getElementById('save-training-settings');
+    if(trSaveBtn) {
+        const tSet = dbLoad('training_settings', { 
+            end_date: '', req_asa: 0, req_hiru: 0, req_yuu: 0, 
+            chance_end_date: '', req_chance: 0, chance_senpai_grade: '2' 
+        });
+        
+        document.getElementById('tr-end-date').value = tSet.end_date || '';
+        document.getElementById('tr-req-asa').value = tSet.req_asa || '';
+        document.getElementById('tr-req-hiru').value = tSet.req_hiru || '';
+        document.getElementById('tr-req-yuu').value = tSet.req_yuu || '';
+        
+        document.getElementById('tr-chance-end-date').value = tSet.chance_end_date || '';
+        document.getElementById('tr-req-chance').value = tSet.req_chance || '';
+        document.getElementById('tr-chance-senpai').value = tSet.chance_senpai_grade || '2';
+        
+        trSaveBtn.addEventListener('click', () => {
+            dbSave('training_settings', {
+                end_date: document.getElementById('tr-end-date').value,
+                req_asa: parseInt(document.getElementById('tr-req-asa').value) || 0,
+                req_hiru: parseInt(document.getElementById('tr-req-hiru').value) || 0,
+                req_yuu: parseInt(document.getElementById('tr-req-yuu').value) || 0,
+                chance_end_date: document.getElementById('tr-chance-end-date').value,
+                req_chance: parseInt(document.getElementById('tr-req-chance').value) || 0,
+                chance_senpai_grade: document.getElementById('tr-chance-senpai').value
+            });
+            alert('研修設定を保存しました。');
+        });
+    }
+
+    // テーマ切替
     const themeToggle = document.getElementById('theme-toggle');
     if(themeToggle){
         if(localStorage.getItem('theme')==='dark') themeToggle.checked=true;
@@ -718,21 +1052,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    const chanceContainer = document.getElementById('chance-exclusion-settings');
-    if(chanceContainer){
-        const savedExclusion = dbLoad('chance_exclusion', []);
-        chanceContainer.querySelectorAll('input').forEach(input => {
-            if(savedExclusion.includes(parseInt(input.value))) input.checked = true;
-        });
-        chanceContainer.addEventListener('change', () => {
-            const newExclusion = [];
-            chanceContainer.querySelectorAll('input:checked').forEach(input => {
-                newExclusion.push(parseInt(input.value));
-            });
-            dbSave('chance_exclusion', newExclusion);
-        });
-    }
-
+    // バックアップ・復元
     const exportBtn = document.getElementById('export-btn');
     if(exportBtn){
         exportBtn.addEventListener('click', ()=>{
@@ -741,6 +1061,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 availability: dbLoad('availability', {}),
                 chance_exclusion: dbLoad('chance_exclusion', []),
                 holiday_settings: dbLoad('holiday_settings', []),
+                chance_target_grade: dbLoad('chance_target_grade', '1'),
+                training_settings: dbLoad('training_settings', {}),
+                shift_holidays: dbLoad('shift_holidays', []),
                 date: new Date().toISOString()
             };
             const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
@@ -768,6 +1091,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         dbSave('availability', d.availability);
                         if(d.chance_exclusion) dbSave('chance_exclusion', d.chance_exclusion);
                         if(d.holiday_settings) dbSave('holiday_settings', d.holiday_settings);
+                        if(d.chance_target_grade) dbSave('chance_target_grade', d.chance_target_grade);
+                        if(d.training_settings) dbSave('training_settings', d.training_settings);
+                        if(d.shift_holidays) dbSave('shift_holidays', d.shift_holidays);
                         alert('復元完了'); location.reload();
                     } else throw new Error();
                 } catch(err){ alert('ファイルエラー'); }
@@ -782,4 +1108,6 @@ document.addEventListener('DOMContentLoaded', () => {
     renderDataView();
     renderGeneratedShift();
     updateNameSuggestions();
+    renderTrainingCounters();
+    if (typeof renderShiftHolidays === "function") renderShiftHolidays();
 });
